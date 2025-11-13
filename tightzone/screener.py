@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-from typing import Any, Dict, List, MutableMapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Protocol, Sequence, runtime_checkable
 
-import requests
+from urllib import request as urllib_request
+from urllib.error import HTTPError, URLError
 
 __all__ = ["Screener", "fetch_scanner_data", "DEFAULT_COLUMNS"]
 
@@ -46,8 +47,10 @@ class Screener:
         Optional custom list of columns to request.  When omitted a sensible
         default set is used.
     session:
-        Optional :class:`requests.Session` used for HTTP requests.  Supplying a
-        session allows connection re-use and simplifies testing.
+        Optional object providing a ``post`` method compatible with
+        :class:`requests.Session`.  Supplying a session allows connection re-use
+        and simplifies testing, but a lightweight ``urllib`` fallback is used
+        when omitted.
     """
 
     market: str
@@ -57,7 +60,7 @@ class Screener:
     min_price: Optional[float] = None
     max_price: Optional[float] = None
     min_volume: Optional[int] = None
-    session: Optional[requests.Session] = field(default=None, repr=False)
+    session: Optional["SupportsPostJSON"] = field(default=None, repr=False)
     timeout: float = 10.0
 
     def _payload(self) -> Dict[str, Any]:
@@ -108,11 +111,26 @@ def _build_url(market: str) -> str:
     return f"https://scanner.tradingview.com/{market_slug}/scan"
 
 
+@runtime_checkable
+class SupportsPostJSON(Protocol):
+    """Protocol describing the subset of ``requests.Session`` used by the screener."""
+
+    def post(
+        self,
+        url: str,
+        *,
+        json: MutableMapping[str, Any],
+        headers: Mapping[str, str],
+        timeout: float,
+    ) -> Any:
+        ...
+
+
 def fetch_scanner_data(
     market: str,
     payload: MutableMapping[str, Any],
     *,
-    session: Optional[requests.Session] = None,
+    session: Optional[SupportsPostJSON] = None,
     timeout: float = 10.0,
 ) -> Dict[str, Any]:
     """Submit ``payload`` to the TradingView scanner API.
@@ -130,23 +148,30 @@ def fetch_scanner_data(
         raise TypeError("payload must be a mutable mapping so it can be serialised to JSON")
 
     url = _build_url(market)
-    session = session or requests.Session()
 
-    try:
-        response = session.post(
-            url,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=timeout,
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:  # pragma: no cover - network errors are environment dependant
-        raise RuntimeError(f"TradingView scanner request failed: {exc}") from exc
+    if session is None:
+        data = _post_via_urllib(url, payload, timeout=timeout)
+    else:
+        post = getattr(session, "post", None)
+        if not callable(post):
+            raise TypeError("session must provide a callable 'post' method")
 
-    try:
-        data = response.json()
-    except json.JSONDecodeError as exc:  # pragma: no cover - depends on remote service
-        raise RuntimeError("TradingView scanner returned invalid JSON") from exc
+        try:
+            response = post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=timeout,
+            )
+        except Exception as exc:  # pragma: no cover - depends on supplied session implementation
+            raise RuntimeError(f"TradingView scanner request failed: {exc}") from exc
+
+        try:
+            _ensure_response_ok(response)
+        except Exception as exc:  # pragma: no cover - depends on supplied session implementation
+            raise RuntimeError(f"TradingView scanner request failed: {exc}") from exc
+
+        data = _decode_json_response(response)
 
     if isinstance(data, dict) and data.get("error"):
         raise RuntimeError(f"TradingView scanner returned an error payload: {data['error']}")
@@ -155,3 +180,65 @@ def fetch_scanner_data(
         raise RuntimeError("Unexpected TradingView response format")
 
     return data
+
+
+def _post_via_urllib(url: str, payload: MutableMapping[str, Any], *, timeout: float) -> Dict[str, Any]:
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib_request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib_request.urlopen(request, timeout=timeout) as response:  # pragma: no cover - network usage
+            raw_body = response.read()
+    except HTTPError as exc:  # pragma: no cover - depends on network interactions
+        raise RuntimeError(
+            f"TradingView scanner request failed: HTTP {exc.code} {exc.reason}"
+        ) from exc
+    except URLError as exc:  # pragma: no cover - depends on environment
+        raise RuntimeError(f"TradingView scanner request failed: {exc.reason}") from exc
+
+    try:
+        text = raw_body.decode("utf-8") if isinstance(raw_body, bytes) else str(raw_body)
+        return json.loads(text) if text else {}
+    except json.JSONDecodeError as exc:  # pragma: no cover - depends on remote service
+        raise RuntimeError("TradingView scanner returned invalid JSON") from exc
+
+
+def _ensure_response_ok(response: Any) -> None:
+    raiser = getattr(response, "raise_for_status", None)
+    if callable(raiser):
+        raiser()
+        return
+
+    status = getattr(response, "status_code", None)
+    if status is None:
+        status = getattr(response, "status", None)
+
+    if status is not None and int(status) >= 400:
+        raise RuntimeError(f"HTTP {status}")
+
+
+def _decode_json_response(response: Any) -> Any:
+    loader = getattr(response, "json", None)
+    if callable(loader):
+        try:
+            return loader()
+        except json.JSONDecodeError as exc:  # pragma: no cover - depends on remote service
+            raise RuntimeError("TradingView scanner returned invalid JSON") from exc
+
+    text = getattr(response, "text", None)
+    if text is None and hasattr(response, "read"):
+        raw = response.read()
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+
+    if text is None:
+        raise RuntimeError("TradingView scanner returned an unreadable response")
+
+    try:
+        return json.loads(text) if text else {}
+    except json.JSONDecodeError as exc:  # pragma: no cover - depends on remote service
+        raise RuntimeError("TradingView scanner returned invalid JSON") from exc
