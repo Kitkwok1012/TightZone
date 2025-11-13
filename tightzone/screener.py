@@ -4,12 +4,47 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Protocol, Sequence, runtime_checkable
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Protocol,
+    Sequence,
+    runtime_checkable,
+)
 
 from urllib import request as urllib_request
 from urllib.error import HTTPError, URLError
 
 __all__ = ["Screener", "fetch_scanner_data", "DEFAULT_COLUMNS"]
+
+
+def _slugify_market(value: str) -> str:
+    slug = value.strip().lower().replace(" ", "")
+    if not slug:
+        raise ValueError("market must be a non-empty string")
+    return slug
+
+
+_DEFAULT_SYMBOL_TYPES: Mapping[str, Sequence[str]] = {
+    "america": ("stock",),
+    "crypto": ("crypto",),
+    "forex": ("forex",),
+    "futures": ("futures",),
+    "cfd": ("cfd",),
+    "index": ("index",),
+}
+
+
+def _coerce_symbol_types(market: str, types: Optional[Iterable[str]]) -> List[str]:
+    if types is not None:
+        return [t for t in types if t]
+
+    return list(_DEFAULT_SYMBOL_TYPES.get(_slugify_market(market), ()))
 
 DEFAULT_COLUMNS: Sequence[str] = (
     "name",
@@ -62,6 +97,7 @@ class Screener:
     min_volume: Optional[int] = None
     session: Optional["SupportsPostJSON"] = field(default=None, repr=False)
     timeout: float = 10.0
+    symbol_types: Optional[Sequence[str]] = None
 
     def _payload(self) -> Dict[str, Any]:
         filters: List[Dict[str, Any]] = []
@@ -79,9 +115,11 @@ class Screener:
 
         upper_bound = max(0, int(self.limit))
 
+        market_slug = _slugify_market(self.market)
+
         return {
-            "markets": [self.market],
-            "symbols": {"query": {"types": []}, "tickers": []},
+            "markets": [market_slug],
+            "symbols": {"query": {"types": _coerce_symbol_types(self.market, self.symbol_types)}, "tickers": []},
             "columns": list(self.columns),
             "filter": filters,
             "sort": {"sortBy": "volume", "sortOrder": "desc"},
@@ -105,9 +143,7 @@ class Screener:
 
 
 def _build_url(market: str) -> str:
-    market_slug = market.strip().lower().replace(" ", "")
-    if not market_slug:
-        raise ValueError("market must be a non-empty string")
+    market_slug = _slugify_market(market)
     return f"https://scanner.tradingview.com/{market_slug}/scan"
 
 
