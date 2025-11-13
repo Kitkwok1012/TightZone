@@ -222,9 +222,9 @@ def _post_via_urllib(url: str, payload: MutableMapping[str, Any], *, timeout: fl
     body = json.dumps(payload).encode("utf-8")
     request = urllib_request.Request(
         url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        #data=body,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="GET",
     )
 
     try:
