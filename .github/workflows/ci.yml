@@ -2,8 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches:
+      - 'codex/**'
   pull_request:
+    branches:
+      - 'codex/**'
 
 jobs:
   tests:
