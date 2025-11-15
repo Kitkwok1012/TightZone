@@ -24,6 +24,7 @@
   "homepage": "https://github.com/Kitkwok1012/TightZone#readme",
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "node-fetch": "^2.7.0"
   }
 }

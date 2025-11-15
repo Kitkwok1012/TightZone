@@ -137,7 +137,7 @@ def _passes_vcp_filter(row: Mapping[str, Any]) -> bool:
     return True
 
 
-@dataclass(slots=True)
+@dataclass
 class Screener:
     """Thin wrapper around the TradingView scanner endpoint.
 

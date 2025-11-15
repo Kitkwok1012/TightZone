@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Stock } from './types';
 import { StockCard } from './StockCard';
+import { identifyVCPZones, calculateVCPQuality } from './vcpUtils';
 import './App.css';
 
 const API_URL = 'http://localhost:5001/api';
@@ -14,6 +15,7 @@ function App() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0, percentage: 0 });
   const [columnsPerRow, setColumnsPerRow] = useState(3); // 2, 3, or 4 columns
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchStocks = useCallback(async (showLoading = true) => {
@@ -118,6 +120,37 @@ function App() {
     }
   }, []);
 
+  const filteredStocks = stocks.filter(
+    (stock) =>
+      stock.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      stock.name?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  const sortedStocks = useMemo(() => {
+    return [...filteredStocks].sort((a, b) => {
+      const qualityA = calculateVCPQuality(identifyVCPZones(a.priceHistory || []));
+      const qualityB = calculateVCPQuality(identifyVCPZones(b.priceHistory || []));
+      if (qualityA.score === qualityB.score) {
+        return a.symbol.localeCompare(b.symbol);
+      }
+      return qualityB.score - qualityA.score;
+    });
+  }, [filteredStocks]);
+  const isCompactLayout = columnsPerRow >= 4;
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(window.scrollY > 400);
+    };
+
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Initial load
   useEffect(() => {
     fetchStocks();
@@ -131,12 +164,6 @@ function App() {
       }
     };
   }, []);
-
-  const filteredStocks = stocks.filter(
-    (stock) =>
-      stock.symbol.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      stock.name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   if (loading) {
     return (
@@ -270,7 +297,7 @@ function App() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3zM14 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1v-3z" />
             </svg>
             <div className="flex gap-1">
-              {[2, 3, 4].map((cols) => (
+              {[2, 3].map((cols) => (
                 <button
                   key={cols}
                   onClick={() => setColumnsPerRow(cols)}
@@ -305,7 +332,7 @@ function App() {
 
       {/* Stock Grid */}
       <main className="max-w-7xl mx-auto px-6 pb-12">
-        {filteredStocks.length === 0 ? (
+        {sortedStocks.length === 0 ? (
           <div className="text-center py-20">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-200 rounded-full mb-4">
               <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -322,8 +349,8 @@ function App() {
               gridTemplateColumns: `repeat(${columnsPerRow}, minmax(0, 1fr))`
             }}
           >
-            {filteredStocks.map((stock) => (
-              <StockCard key={stock.symbol} stock={stock} />
+            {sortedStocks.map((stock) => (
+              <StockCard key={stock.symbol} stock={stock} compact={isCompactLayout} />
             ))}
           </div>
         )}
@@ -361,10 +388,22 @@ function App() {
             </div>
           </div>
           <div className="mt-6 text-center text-gray-500 text-xs">
-            <p>Built with React • Real-time market data from TradingView & Yahoo Finance</p>
+            <p>Built with React • Delayed market data from TradingView & Yahoo Finance</p>
           </div>
         </div>
       </footer>
+
+      {showBackToTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-8 right-6 z-50 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xl rounded-full p-3 hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          aria-label="Back to top"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

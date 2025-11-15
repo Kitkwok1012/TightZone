@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tightzone.screener import Screener
 from tightzone.charting import fetch_price_history
+from tightzone.news import fetch_recent_news
 
 
 def fetch_stock_data(stock, index, total):
@@ -29,6 +30,12 @@ def fetch_stock_data(stock, index, total):
     except Exception as e:
         print(f"    Warning: Could not fetch history for {symbol}: {e}")
 
+    news_items = []
+    try:
+        news_items = fetch_recent_news(symbol, limit=3, days=3)
+    except Exception as e:
+        print(f"    Warning: Could not fetch news for {symbol}: {e}")
+
     return {
         "symbol": symbol,
         "name": stock.get("name"),
@@ -41,6 +48,7 @@ def fetch_stock_data(stock, index, total):
         "perfYear": stock.get("Perf.Y"),
         "sma200": stock.get("SMA200"),
         "priceHistory": price_history,
+        "news": news_items,
     }
 
 

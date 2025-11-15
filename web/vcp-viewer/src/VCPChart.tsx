@@ -9,6 +9,7 @@ import {
   ResponsiveContainer,
   ReferenceArea,
   ReferenceLine,
+  Legend,
 } from 'recharts';
 import { Stock } from './types';
 import { identifyVCPZones } from './vcpUtils';
@@ -18,7 +19,7 @@ interface VCPChartProps {
 }
 
 export const VCPChart: React.FC<VCPChartProps> = ({ stock }) => {
-  const { priceHistory, sma200 } = stock;
+  const { priceHistory } = stock;
 
   if (!priceHistory || priceHistory.length === 0) {
     return <div className="text-gray-500 text-center p-4">No price data available</div>;
@@ -26,6 +27,27 @@ export const VCPChart: React.FC<VCPChartProps> = ({ stock }) => {
 
   // Identify VCP zones
   const vcpZones = identifyVCPZones(priceHistory);
+
+  const calculateSMA = (history: typeof priceHistory, period: number) => {
+    const smaValues: Array<number | null> = [];
+    let rollingSum = 0;
+    for (let i = 0; i < history.length; i += 1) {
+      rollingSum += history[i].close;
+      if (i >= period) {
+        rollingSum -= history[i - period].close;
+      }
+      if (i + 1 >= period) {
+        smaValues.push(rollingSum / period);
+      } else {
+        smaValues.push(null);
+      }
+    }
+    return smaValues;
+  };
+
+  const sma20 = calculateSMA(priceHistory, 20);
+  const sma50 = calculateSMA(priceHistory, 50);
+  const sma200 = calculateSMA(priceHistory, 200);
 
   // Prepare data for chart
   const chartData = priceHistory.map((bar, index) => ({
@@ -35,6 +57,9 @@ export const VCPChart: React.FC<VCPChartProps> = ({ stock }) => {
       month: 'short',
       day: 'numeric',
     }),
+    sma20: sma20[index],
+    sma50: sma50[index],
+    sma200: sma200[index],
   }));
 
   // Calculate min/max for Y-axis
@@ -64,13 +89,26 @@ export const VCPChart: React.FC<VCPChartProps> = ({ stock }) => {
               borderRadius: '6px',
             }}
             formatter={(value: any, name: string) => {
-              if (name === 'close') {
-                return [`$${Number(value).toFixed(2)}`, 'Close'];
+              if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return ['-', name];
               }
-              return [value, name];
+              const formatted = `$${Number(value).toFixed(2)}`;
+              switch (name) {
+                case 'close':
+                  return [formatted, 'Close'];
+                case 'sma20':
+                  return [formatted, 'SMA 20'];
+                case 'sma50':
+                  return [formatted, 'SMA 50'];
+                case 'sma200':
+                  return [formatted, 'SMA 200'];
+                default:
+                  return [value, name];
+              }
             }}
             labelFormatter={(label) => label}
           />
+          <Legend verticalAlign="top" height={24} iconType="line" />
 
           {/* VCP Zones */}
           {vcpZones.map((zone, idx) => {
@@ -109,16 +147,25 @@ export const VCPChart: React.FC<VCPChartProps> = ({ stock }) => {
             );
           })}
 
-          {/* SMA200 line */}
-          {sma200 && (
-            <ReferenceLine
-              y={sma200}
-              stroke="#9ca3af"
-              strokeDasharray="5 5"
-              strokeWidth={1}
-              label={{ value: 'SMA200', position: 'right', fill: '#6b7280', fontSize: 12 }}
+          {/* Moving averages */}
+          {[
+            { key: 'sma20', stroke: '#f97316', name: 'SMA 20', strokeWidth: 1.5, dash: '4 2' },
+            { key: 'sma50', stroke: '#a855f7', name: 'SMA 50', strokeWidth: 1.5, dash: '6 3' },
+            { key: 'sma200', stroke: '#9ca3af', name: 'SMA 200', strokeWidth: 2, dash: '8 4' },
+          ].map((line) => (
+            <Line
+              key={line.key}
+              type="monotone"
+              dataKey={line.key}
+              name={line.name}
+              stroke={line.stroke}
+              strokeWidth={line.strokeWidth}
+              strokeDasharray={line.dash}
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
             />
-          )}
+          ))}
 
           {/* Price line */}
           <Line

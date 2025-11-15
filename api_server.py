@@ -3,10 +3,12 @@
 from flask import Flask, jsonify, send_file
 from flask_cors import CORS
 from pathlib import Path
+from typing import MutableMapping, Sequence
 import json
 
 from tightzone.screener import Screener
 from tightzone.charting import generate_charts
+from tightzone.news import fetch_recent_news
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React app
@@ -15,18 +17,54 @@ CHARTS_DIR = Path("charts")
 CACHE_FILE = Path("vcp_stocks_cache.json")
 
 
+def _attach_latest_news(stocks: Sequence[MutableMapping[str, object]], *, force: bool = False) -> bool:
+    """Ensure each stock has up-to-date news attached.
+
+    Returns True when any news entries were freshly fetched.
+    """
+    updated = False
+    for stock in stocks:
+        if not isinstance(stock, MutableMapping):
+            continue
+        symbol = stock.get("symbol")
+        if not isinstance(symbol, str) or not symbol:
+            continue
+        news_items = stock.get("news")
+        if not force and isinstance(news_items, list) and news_items:
+            continue
+        try:
+            stock["news"] = fetch_recent_news(symbol, limit=3, days=3)
+        except Exception:
+            stock["news"] = []
+        updated = True
+    return updated
+
+
 def get_vcp_stocks(force_refresh=False):
     """Get VCP stocks data, using cache if available."""
     if not force_refresh and CACHE_FILE.exists():
         with open(CACHE_FILE) as f:
-            return json.load(f)
+            stocks = json.load(f)
+        if _attach_latest_news(stocks, force=False):
+            with open(CACHE_FILE, "w") as f:
+                json.dump(stocks, f, indent=2)
+        return stocks
 
     # Fetch fresh data
     screener = Screener(market="america", apply_vcp_filter=True)
     stocks = screener.scan()
 
+    for stock in stocks:
+        symbol = stock.get("symbol")
+        try:
+            stock["news"] = fetch_recent_news(symbol, limit=3, days=3)
+        except Exception:
+            stock["news"] = []
+
     # Generate charts
     generate_charts(stocks, CHARTS_DIR, period="6mo", interval="1d")
+
+    _attach_latest_news(stocks, force=True)
 
     # Save to cache
     with open(CACHE_FILE, "w") as f:
