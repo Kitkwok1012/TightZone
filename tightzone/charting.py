@@ -40,7 +40,7 @@ def fetch_price_history(symbol: str, *, period: str = "6mo", interval: str = "1d
         },
     )
     try:
-        with urllib_request.urlopen(request, timeout=10) as response:
+        with urllib_request.urlopen(request, timeout=3) as response:
             raw_body = response.read()
     except urllib_error.HTTPError as exc:  # pragma: no cover - depends on network
         raise RuntimeError(f"Failed to download price history for {symbol}: HTTP {exc.code}") from exc

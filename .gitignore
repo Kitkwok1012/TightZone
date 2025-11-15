@@ -215,3 +215,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
+backend.log
+
+# Cache files
+vcp_cache.json

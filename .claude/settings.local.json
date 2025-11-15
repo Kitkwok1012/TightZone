@@ -11,7 +11,8 @@
       "Bash(npm uninstall:*)",
       "Bash(npm init:*)",
       "Bash(lsof:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []
