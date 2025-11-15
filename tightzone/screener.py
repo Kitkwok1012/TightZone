@@ -23,11 +23,18 @@ from urllib.error import HTTPError, URLError
 __all__ = ["Screener", "fetch_scanner_data", "DEFAULT_COLUMNS"]
 
 
+_MARKET_ALIASES: Mapping[str, str] = {
+    "us": "america",
+    "usa": "america",
+    "unitedstates": "america",
+}
+
+
 def _slugify_market(value: str) -> str:
     slug = value.strip().lower().replace(" ", "")
     if not slug:
         raise ValueError("market must be a non-empty string")
-    return slug
+    return _MARKET_ALIASES.get(slug, slug)
 
 
 _DEFAULT_SYMBOL_TYPES: Mapping[str, Sequence[str]] = {
@@ -51,9 +58,13 @@ DEFAULT_COLUMNS: Sequence[str] = (
     "close",
     "change|1D",
     "Perf.W",
-    "Perf.M",
+    "Perf.1M",
     "Perf.Y",
     "volume",
+    "SMA200",
+    "market_cap_basic",
+    "beta_1_year",
+    "average_volume_30d_calc",
 )
 
 _DEFAULT_FILTERS: Dict[str, MutableMapping[str, Any]] = {
@@ -62,6 +73,68 @@ _DEFAULT_FILTERS: Dict[str, MutableMapping[str, Any]] = {
     "max_price": {"left": "close", "operation": "less", "right": None},
     "min_volume": {"left": "volume", "operation": "greater", "right": None},
 }
+
+_VCP_REQUIRED_COLUMNS: Sequence[str] = (
+    "close",
+    "SMA200",
+    "market_cap_basic",
+    "beta_1_year",
+    "average_volume_30d_calc",
+)
+
+_VCP_MIN_PRICE = 12.0
+_VCP_MIN_MARKET_CAP = 2_000_000_000
+_VCP_MIN_BETA = 1.0
+_VCP_MIN_PRICE_VOLUME = 900_000_000.0
+_PAGE_SIZE = 200
+
+
+def _ensure_columns(columns: Sequence[str], required: Sequence[str]) -> List[str]:
+    requested = list(columns)
+    for column in required:
+        if column not in requested:
+            requested.append(column)
+    return requested
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _passes_vcp_filter(row: Mapping[str, Any]) -> bool:
+    price = _coerce_float(row.get("close"))
+    sma200 = _coerce_float(row.get("SMA200"))
+    market_cap = _coerce_float(row.get("market_cap_basic"))
+    beta = _coerce_float(row.get("beta_1_year"))
+    avg_volume = _coerce_float(row.get("average_volume_30d_calc"))
+
+    if (
+        price is None
+        or sma200 is None
+        or market_cap is None
+        or beta is None
+        or avg_volume is None
+    ):
+        return False
+
+    if price <= sma200:
+        return False
+    if price <= _VCP_MIN_PRICE:
+        return False
+    if market_cap <= _VCP_MIN_MARKET_CAP:
+        return False
+    if beta <= _VCP_MIN_BETA:
+        return False
+    if price * avg_volume <= _VCP_MIN_PRICE_VOLUME:
+        return False
+    return True
 
 
 @dataclass(slots=True)
@@ -76,8 +149,6 @@ class Screener:
         user to know the correct top-level endpoint.
     exchange:
         Symbol exchange to filter on (``NASDAQ``, ``NYSE``, ``AMEX`` …).
-    limit:
-        Upper bound for the number of rows returned by TradingView.
     columns:
         Optional custom list of columns to request.  When omitted a sensible
         default set is used.
@@ -90,7 +161,6 @@ class Screener:
 
     market: str
     exchange: Optional[str] = None
-    limit: int = 25
     columns: Sequence[str] = DEFAULT_COLUMNS
     min_price: Optional[float] = None
     max_price: Optional[float] = None
@@ -98,8 +168,9 @@ class Screener:
     session: Optional["SupportsPostJSON"] = field(default=None, repr=False)
     timeout: float = 10.0
     symbol_types: Optional[Sequence[str]] = None
+    apply_vcp_filter: bool = False
 
-    def _payload(self) -> Dict[str, Any]:
+    def _payload(self, start: int, end: int) -> Dict[str, Any]:
         filters: List[Dict[str, Any]] = []
 
         def _materialise_filter(key: str, value: Optional[Any]) -> None:
@@ -113,31 +184,52 @@ class Screener:
         _materialise_filter("max_price", self.max_price)
         _materialise_filter("min_volume", self.min_volume)
 
-        upper_bound = max(0, int(self.limit))
+        columns = list(self.columns)
+        if self.apply_vcp_filter:
+            columns = _ensure_columns(columns, _VCP_REQUIRED_COLUMNS)
 
         market_slug = _slugify_market(self.market)
+        start = max(0, int(start))
+        end = max(start, int(end))
 
         return {
             "markets": [market_slug],
             "symbols": {"query": {"types": _coerce_symbol_types(self.market, self.symbol_types)}, "tickers": []},
-            "columns": list(self.columns),
+            "columns": columns,
             "filter": filters,
             "sort": {"sortBy": "volume", "sortOrder": "desc"},
             "options": {"lang": "en"},
-            "range": [0, max(0, upper_bound - 1)],
+            "range": [start, end],
         }
 
     def scan(self) -> List[Dict[str, Any]]:
-        payload = self._payload()
-        raw = fetch_scanner_data(self.market, payload, session=self.session, timeout=self.timeout)
-
-        columns = raw.get("columns", list(self.columns))
         rows: List[Dict[str, Any]] = []
-        for entry in raw.get("data", []):
-            values = entry.get("d", [])
-            row = {column: value for column, value in zip(columns, values)}
-            row["symbol"] = entry.get("s")
-            rows.append(row)
+        columns = list(self.columns)
+        start = 0
+        while True:
+            payload = self._payload(start, start + _PAGE_SIZE - 1)
+            raw = fetch_scanner_data(self.market, payload, session=self.session, timeout=self.timeout)
+
+            columns = raw.get("columns", columns)
+            chunk: List[Dict[str, Any]] = []
+            for entry in raw.get("data", []):
+                values = entry.get("d", [])
+                row = {column: value for column, value in zip(columns, values)}
+                row["symbol"] = entry.get("s")
+                chunk.append(row)
+
+            if not chunk:
+                break
+
+            rows.extend(chunk)
+
+            if len(chunk) < _PAGE_SIZE:
+                break
+
+            start += _PAGE_SIZE
+
+        if self.apply_vcp_filter:
+            rows = [row for row in rows if _passes_vcp_filter(row)]
 
         return rows
 
@@ -219,21 +311,38 @@ def fetch_scanner_data(
 
 
 def _post_via_urllib(url: str, payload: MutableMapping[str, Any], *, timeout: float) -> Dict[str, Any]:
-    body = json.dumps(payload).encode("utf-8")
-    request = urllib_request.Request(
-        url,
-        #data=body,
-        headers={"Content-Type": "application/json; charset=utf-8"},
-        method="GET",
-    )
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.tradingview.com",
+        "Referer": "https://www.tradingview.com/",
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+    }
+    request = urllib_request.Request(url, data=body, headers=headers)
 
     try:
         with urllib_request.urlopen(request, timeout=timeout) as response:  # pragma: no cover - network usage
             raw_body = response.read()
     except HTTPError as exc:  # pragma: no cover - depends on network interactions
-        raise RuntimeError(
-            f"TradingView scanner request failed: HTTP {exc.code} {exc.reason}"
-        ) from exc
+        detail = b""
+        if exc.fp:
+            try:
+                detail = exc.fp.read()
+            except Exception:
+                detail = b""
+        message = f"TradingView scanner request failed: HTTP {exc.code} {exc.reason}"
+        if detail:
+            try:
+                decoded = detail.decode("utf-8")
+            except Exception:
+                decoded = repr(detail)
+            message = f"{message} ({decoded.strip()})"
+        raise RuntimeError(message) from exc
     except URLError as exc:  # pragma: no cover - depends on environment
         raise RuntimeError(f"TradingView scanner request failed: {exc.reason}") from exc
 

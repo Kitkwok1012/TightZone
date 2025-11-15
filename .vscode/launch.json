@@ -14,10 +14,19 @@
         },
         {
             "name": "TightZone CLI",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "tightzone.cli",
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "args": ["--vcp-filter"]
+        },
+        {
+            "name": "TightZone CLI with Charts",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "tightzone.cli",
+            "cwd": "${workspaceFolder}",
+            "args": ["--vcp-filter", "--charts-dir", "charts", "--pretty"]
         }
     ]
 }

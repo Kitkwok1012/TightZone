@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import json
 import sys
 from typing import Iterable, Optional, Sequence
 
+from .charting import generate_charts
 from .screener import DEFAULT_COLUMNS, Screener
 
 
@@ -22,12 +24,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Exchange symbol to filter on (e.g. NASDAQ, NYSE)",
     )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=25,
-        help="Maximum number of results to return",
-    )
     parser.add_argument("--min-price", type=float, default=None, help="Minimum last price filter")
     parser.add_argument("--max-price", type=float, default=None, help="Maximum last price filter")
     parser.add_argument("--min-volume", type=int, default=None, help="Minimum volume filter")
@@ -36,6 +32,16 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs="*",
         default=None,
         help="Optional list of TradingView column identifiers to request",
+    )
+    parser.add_argument(
+        "--vcp-filter",
+        action="store_true",
+        help="Apply the default VCP screening rules (price>SMA200, price>12, market cap>2B, beta>1, price*avg volume>900M)",
+    )
+    parser.add_argument(
+        "--charts-dir",
+        default=None,
+        help="Optional directory to store SVG charts for each resulting ticker",
     )
     parser.add_argument(
         "--pretty",
@@ -58,11 +64,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     screener = Screener(
         market=args.market,
         exchange=args.exchange,
-        limit=args.limit,
         columns=_normalise_columns(args.columns) or DEFAULT_COLUMNS,
         min_price=args.min_price,
         max_price=args.max_price,
         min_volume=args.min_volume,
+        apply_vcp_filter=args.vcp_filter,
     )
 
     try:
@@ -70,6 +76,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+
+    if args.charts_dir:
+        generate_charts(results, Path(args.charts_dir))
 
     if args.pretty:
         json.dump(results, sys.stdout, indent=2)
