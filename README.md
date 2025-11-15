@@ -1,55 +1,62 @@
 # TightZone
+This project is a Python-based tool that automates the detection of VCP (Volatility Contraction Pattern) setups in stock charts. It integrates with TradingView's stock screener to fetch candidates, applies custom logic to identify tightening price action, and visualizes the results with clear chart output. Ideal for traders looking to spot quiet breakout setups programmatically.
 
-TightZone is a Python utility that re-creates the TradingView VCP screener
-shown in the accompanying screenshot. It uses the [`tradingview-ta`][tradingview-ta]
-library to call TradingView's stock scanner API with a pre-configured set of
-fundamental and technical filters tailored to the VCP (Volatility Contraction
-Pattern) setup.
+## Quick Start - Web Viewer
 
-## Features
-
-- Pre-built TradingView filter payload based on the screenshot criteria:
-  - U.S. stock market universe (`america` screener).
-  - Price trading above the 200-day simple moving average and above USD 12.
-  - Market capitalisation greater than USD 900M with a preference toward large caps.
-  - Positive EPS growth and ROE, moderate P/E, low PEG ratio, and beta below 1.
-- Simple CLI for fetching screener results or dumping the underlying payload for
-  manual inspection in TradingView's screener UI.
-- Extensible filter definitions that can be tweaked via JSON.
-
-## Installation
+The fastest way to get started is using the web interface. Works on **macOS, Linux, and Windows**:
 
 ```bash
-pip install .
+node start.js
 ```
 
-The installation command above will also install the `tradingview-ta` dependency.
+Or on Unix-based systems (macOS/Linux):
+```bash
+./start.js
+```
 
-## Usage
+This will:
+- Automatically detect your operating system
+- Kill any existing processes on ports 3000 and 5001
+- Start the backend API server (port 5001)
+- Start the React frontend (port 3000)
+- Automatically open the app in your browser
+
+The web viewer provides:
+- Interactive stock charts with VCP patterns
+- Real-time data refresh
+- Sortable and filterable stock lists
+- Performance metrics and indicators
+
+### Manual Startup
+
+If you prefer to start servers separately:
+
+**Terminal 1 - Backend API Server:**
+```bash
+node server.js
+```
+
+**Terminal 2 - React Frontend:**
+```bash
+cd web/vcp-viewer
+npm start
+```
+
+### Stopping the Application
+
+- If using `start.js`: Press `Ctrl+C` to stop both servers
+- If running manually: Press `Ctrl+C` in each terminal
+
+## CLI Usage
+
+Query the TradingView screener and save PNG charts (price + volume + VCP shading) for every filtered ticker:
 
 ```bash
-# Print the TradingView payload to inspect it before running the scan
-python -m tightzone.cli --dump-payload
-
-# Fetch the default VCP candidates (100 tickers by default)
-python -m tightzone.cli
-
-# Limit results to the NASDAQ exchange and request only 25 tickers
-python -m tightzone.cli --exchange NASDAQ --limit 25
-
-# Supply a custom JSON filter definition
-python -m tightzone.cli --filters my_filters.json
+python3 -m tightzone.cli --market america --vcp-filter --charts-dir charts --pretty
 ```
 
-Every command prints JSON lines with the symbol and requested columns returned
-by TradingView.
+Each row in the JSON output includes the generated chart path (if available). The PNG files show close price, trading volume, and automatically shaded Volatility Contraction Pattern segments. Rendering requires `matplotlib`; install it with:
 
-## Custom filters
-
-The default filter configuration lives in `tightzone/filters.py`. To experiment
-with different criteria, copy the `DEFAULT_FILTERS` list into a separate JSON
-file and pass it to the CLI via the `--filters` option. The payload format is
-identical to TradingView's screener API and can be pasted directly into the
-browser developer tools when debugging.
-
-[tradingview-ta]: https://pypi.org/project/tradingview-ta/
+```bash
+python3 -m pip install matplotlib
+```

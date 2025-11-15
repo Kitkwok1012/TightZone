@@ -1,57 +1,90 @@
-"""Command line interface for running the VCP screener."""
+"""Command line interface for the TightZone screener."""
 
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
-from typing import Iterable
+import json
+import sys
+from typing import Iterable, Optional, Sequence
 
-from .filters import DEFAULT_COLUMNS, DEFAULT_FILTERS, DEFAULT_SORT
-from .screener import VCPScreener, build_filter_payload
+from .charting import generate_charts
+from .screener import DEFAULT_COLUMNS, Screener
 
 
-def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the TightZone VCP screener.")
-    parser.add_argument("--exchange", default="", help="Optional exchange to limit results (e.g. NASDAQ)")
-    parser.add_argument("--limit", type=int, default=100, help="Number of results to request from TradingView")
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Query the TradingView screener")
     parser.add_argument(
-        "--filters",
-        type=Path,
-        help="Path to a JSON file containing custom TradingView filter definitions",
+        "--market",
+        default="america",
+        help="TradingView market slug to query (default: america)",
     )
     parser.add_argument(
-        "--dump-payload",
+        "--exchange",
+        default=None,
+        help="Exchange symbol to filter on (e.g. NASDAQ, NYSE)",
+    )
+    parser.add_argument("--min-price", type=float, default=None, help="Minimum last price filter")
+    parser.add_argument("--max-price", type=float, default=None, help="Maximum last price filter")
+    parser.add_argument("--min-volume", type=int, default=None, help="Minimum volume filter")
+    parser.add_argument(
+        "--columns",
+        nargs="*",
+        default=None,
+        help="Optional list of TradingView column identifiers to request",
+    )
+    parser.add_argument(
+        "--vcp-filter",
         action="store_true",
-        help="Print the generated TradingView payload without running the scan",
+        help="Apply the default VCP screening rules (price>SMA200, price>12, market cap>2B, beta>1, price*avg volume>900M)",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--charts-dir",
+        default=None,
+        help="Optional directory to store SVG charts for each resulting ticker",
+    )
+    parser.add_argument(
+        "--pretty",
+        action="store_true",
+        help="Pretty-print JSON output instead of compact representation",
+    )
+    return parser
 
 
-def main(argv: Iterable[str] | None = None) -> int:
-    args = parse_args(argv)
+def _normalise_columns(columns: Optional[Sequence[str]]) -> Optional[Sequence[str]]:
+    if not columns:
+        return None
+    return tuple(column for column in columns if column)
 
-    filters = DEFAULT_FILTERS
-    if args.filters:
-        filters = json.loads(Path(args.filters).read_text(encoding="utf-8"))
 
-    screener = VCPScreener(exchange=args.exchange, limit=args.limit, filters=filters)
+def main(argv: Optional[Iterable[str]] = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
 
-    if args.dump_payload:
-        payload = build_filter_payload(
-            filters=filters,
-            columns=DEFAULT_COLUMNS,
-            sort=DEFAULT_SORT,
-            limit=args.limit,
-            exchange=args.exchange,
-        )
-        print(json.dumps(payload, indent=2))
-        return 0
+    screener = Screener(
+        market=args.market,
+        exchange=args.exchange,
+        columns=_normalise_columns(args.columns) or DEFAULT_COLUMNS,
+        min_price=args.min_price,
+        max_price=args.max_price,
+        min_volume=args.min_volume,
+        apply_vcp_filter=args.vcp_filter,
+    )
 
-    results = screener.scan()
-    for row in results:
-        print(json.dumps(row))
+    try:
+        results = screener.scan()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
+    if args.charts_dir:
+        generate_charts(results, Path(args.charts_dir))
+
+    if args.pretty:
+        json.dump(results, sys.stdout, indent=2)
+    else:
+        json.dump(results, sys.stdout, separators=(",", ":"))
+    sys.stdout.write("\n")
     return 0
 
 
