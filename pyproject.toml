@@ -1,0 +1,14 @@
+[project]
+name = "tightzone"
+version = "0.1.0"
+description = "TradingView VCP screener utilities"
+authors = [{ name = "TightZone" }]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "tradingview-ta==3.3.0",
+]
+
+[project.scripts]
+tightzone = "tightzone.cli:main"
+    
