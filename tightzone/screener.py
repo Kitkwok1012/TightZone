@@ -206,9 +206,19 @@ class Screener:
         rows: List[Dict[str, Any]] = []
         columns = list(self.columns)
         start = 0
+        total_count = None
+
         while True:
+            # Stop if we've already fetched all available stocks
+            if total_count is not None and start >= total_count:
+                break
+
             payload = self._payload(start, start + _PAGE_SIZE - 1)
             raw = fetch_scanner_data(self.market, payload, session=self.session, timeout=self.timeout)
+
+            # Get total count from first response
+            if total_count is None:
+                total_count = raw.get("totalCount")
 
             columns = raw.get("columns", columns)
             chunk: List[Dict[str, Any]] = []
@@ -218,13 +228,11 @@ class Screener:
                 row["symbol"] = entry.get("s")
                 chunk.append(row)
 
+            # Stop if no data returned
             if not chunk:
                 break
 
             rows.extend(chunk)
-
-            if len(chunk) < _PAGE_SIZE:
-                break
 
             start += _PAGE_SIZE
 

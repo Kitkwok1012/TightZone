@@ -1,0 +1,29 @@
+{
+  "name": "tightzone-1",
+  "version": "1.0.0",
+  "description": "This project is a Python-based tool that automates the detection of VCP (Volatility Contraction Pattern) setups in stock charts. It integrates with TradingView's stock screener to fetch candidates, applies custom logic to identify tightening price action, and visualizes the results with clear chart output. Ideal for traders looking to spot quiet breakout setups programmatically.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "server": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kitkwok1012/TightZone.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Kitkwok1012/TightZone/issues"
+  },
+  "homepage": "https://github.com/Kitkwok1012/TightZone#readme",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  }
+}

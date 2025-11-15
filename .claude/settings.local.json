@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m tightzone.cli:*)",
+      "Bash(cat:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(./node_modules/.bin/tailwindcss:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npm init:*)",
+      "Bash(lsof:*)",
+      "Bash(curl:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
